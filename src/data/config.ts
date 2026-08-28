@@ -37,6 +37,19 @@ export const CONFIG = {
       "https://server.crmline.uz/api",
     formSlug: import.meta.env.VITE_CRM_FORM_SLUG || "hrline-lidlar-mc1av",
   },
+
+  /**
+   * Google Ads (gtag.js). Asosiy teg index.html'da.
+   * conversionId — "AW-XXXXXXXXX".
+   * conversionLabel — Google Ads → Goals → Conversions → "Lead / ariza"
+   *   konversiya amali sahifasidagi send_to'ning "/" dan keyingi qismi.
+   *   Bo'sh bo'lsa forma yuborilganda faqat GA4 "generate_lead" hodisasi
+   *   yuboriladi (Google Ads konversiyasi sifatida hisoblanmaydi).
+   */
+  ads: {
+    conversionId: import.meta.env.VITE_ADS_CONVERSION_ID || "AW-18413116444",
+    conversionLabel: import.meta.env.VITE_ADS_CONVERSION_LABEL || "",
+  },
 };
 
 export const NAV = [

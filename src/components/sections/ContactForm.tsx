@@ -22,6 +22,28 @@ const empty: Fields = {
   comment: "",
 };
 
+declare global {
+  interface Window {
+    gtag?: (...args: unknown[]) => void;
+  }
+}
+
+/**
+ * Ariza muvaffaqiyatli yuborilganda Google Ads / GA4'ga xabar beramiz.
+ * - generate_lead — GA4 standart hodisasi (doim yuboriladi)
+ * - conversion   — Google Ads konversiyasi (faqat conversionLabel sozlangan bo'lsa)
+ */
+function reportLeadConversion(src: string) {
+  if (typeof window === "undefined" || typeof window.gtag !== "function") return;
+  window.gtag("event", "generate_lead", { source: src || "hrline-sayt" });
+  const { conversionId, conversionLabel } = CONFIG.ads;
+  if (conversionLabel) {
+    window.gtag("event", "conversion", {
+      send_to: `${conversionId}/${conversionLabel}`,
+    });
+  }
+}
+
 /**
  * Sahifa URL'idagi manba parametri: ?src= / ?utm_source= / ?source= / ?ref=
  * Har Telegram guruhga alohida link tarqatib (masalan
@@ -103,6 +125,7 @@ export function ContactForm() {
       if (!res.ok || !data?.success) {
         throw new Error(data?.message || "request failed");
       }
+      reportLeadConversion(source);
       setSent(true);
       setValues(empty);
     } catch {
