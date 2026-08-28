@@ -22,12 +22,39 @@ const empty: Fields = {
   comment: "",
 };
 
+/**
+ * Sahifa URL'idagi manba parametri: ?src= / ?utm_source= / ?source= / ?ref=
+ * Har Telegram guruhga alohida link tarqatib (masalan
+ * https://hrline.uz/?src=tg-hrchat#contact), lidlar qayerdan kelganini ajratamiz.
+ */
+function detectSource(): string {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const raw = (
+      q.get("src") ||
+      q.get("utm_source") ||
+      q.get("source") ||
+      q.get("ref") ||
+      ""
+    )
+      .trim()
+      .slice(0, 80);
+    // Parametr bo'lmasa — sayt formasi ekanini bildiramiz.
+    return raw || "hrline-sayt";
+  } catch {
+    return "hrline-sayt";
+  }
+}
+
 export function ContactForm() {
   const { t } = useI18n();
   const c = t.contact;
   const [values, setValues] = useState<Fields>(empty);
   const [errors, setErrors] = useState<Partial<Record<keyof Fields, string>>>({});
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [source] = useState(detectSource);
 
   const set = (k: keyof Fields, v: string) => {
     setValues((s) => ({ ...s, [k]: v }));
@@ -47,12 +74,42 @@ export function ContactForm() {
     return Object.keys(e).length === 0;
   };
 
-  const onSubmit = (ev: FormEvent) => {
+  const onSubmit = async (ev: FormEvent) => {
     ev.preventDefault();
+    if (submitting) return;
     if (!validate()) return;
-    // Front-end only: integrate with your CRM / backend endpoint here.
-    setSent(true);
-    setValues(empty);
+
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const res = await fetch(
+        `${CONFIG.crm.apiUrl}/lead-forms/p/${CONFIG.crm.formSlug}/submit`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: values.name.trim(),
+            phone: values.phone.trim(),
+            answers: {
+              Kompaniya: values.company.trim(),
+              "Xodimlar soni": values.employees.trim(),
+              ...(values.comment.trim() ? { Izoh: values.comment.trim() } : {}),
+            },
+            source,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || "request failed");
+      }
+      setSent(true);
+      setValues(empty);
+    } catch {
+      setFormError(c.errors.network);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -174,9 +231,20 @@ export function ContactForm() {
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <Button type="submit" size="lg" className="w-full" withArrow>
-                        {c.submit}
+                      <Button
+                        type="submit"
+                        size="lg"
+                        className="w-full"
+                        withArrow
+                        disabled={submitting}
+                      >
+                        {submitting ? c.sending : c.submit}
                       </Button>
+                      {formError && (
+                        <p className="mt-3 text-center text-[13px] font-medium text-rose-500">
+                          {formError}
+                        </p>
+                      )}
                     </div>
                   </motion.form>
                 )}

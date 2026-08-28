@@ -21,6 +21,22 @@ export const CONFIG = {
   },
 
   attendance: { time: "09:02" },
+
+  /**
+   * CRM (crmline) lid-forma integratsiyasi.
+   * Ariza formasi to'ldirilganda crmline'dagi ommaviy lid-forma endpoint'iga
+   * yuboriladi va CRM'da Contact + Deal yaratiladi.
+   *
+   * apiUrl  — crmline backend'ining ommaviy API manzili.
+   * formSlug — CRM → Sozlamalar → CRM → Formalar'da yaratilgan forma slug'i.
+   *            (crmline.uz/f/<slug> sahifasidagi qism)
+   */
+  crm: {
+    apiUrl:
+      import.meta.env.VITE_CRM_API_URL?.replace(/\/$/, "") ||
+      "https://server.crmline.uz/api",
+    formSlug: import.meta.env.VITE_CRM_FORM_SLUG || "hrline-lidlar-mc1av",
+  },
 };
 
 export const NAV = [

@@ -318,6 +318,7 @@ export const uz: Dict = {
     success: "Rahmat! Tez orada siz bilan bogʻlanamiz.",
     sendAnother: "Yana bitta ariza yuborish",
     submit: "Ariza yuborish",
+    sending: "Yuborilmoqda…",
     phonePlaceholder: "+998 __ ___ __ __",
     salesDept: "Savdo boʻlimi",
     techDept: "Texnik boʻlim",
@@ -334,6 +335,7 @@ export const uz: Dict = {
       phone: "Toʻgʻri telefon raqamini kiriting",
       employeesRequired: "Sonini kiriting",
       employeesNumber: "Faqat raqam",
+      network: "Yuborib boʻlmadi. Aloqani tekshirib, qayta urinib koʻring.",
     },
   },
 

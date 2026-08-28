@@ -317,6 +317,7 @@ export const en: Dict = {
     success: "Thank you! We'll get in touch with you shortly.",
     sendAnother: "Send another request",
     submit: "Send request",
+    sending: "Sending…",
     phonePlaceholder: "+998 __ ___ __ __",
     salesDept: "Sales team",
     techDept: "Tech support",
@@ -333,6 +334,7 @@ export const en: Dict = {
       phone: "Enter a valid phone number",
       employeesRequired: "Enter the number",
       employeesNumber: "Numbers only",
+      network: "Couldn't send. Check your connection and try again.",
     },
   },
 

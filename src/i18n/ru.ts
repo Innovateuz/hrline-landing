@@ -316,6 +316,7 @@ export const ru = {
     success: "Спасибо! Мы свяжемся с вами в ближайшее время.",
     sendAnother: "Отправить ещё одну заявку",
     submit: "Отправить заявку",
+    sending: "Отправляем…",
     phonePlaceholder: "+998 __ ___ __ __",
     salesDept: "Отдел продаж",
     techDept: "Тех. отдел",
@@ -332,6 +333,7 @@ export const ru = {
       phone: "Укажите корректный телефон",
       employeesRequired: "Укажите количество",
       employeesNumber: "Только число",
+      network: "Не удалось отправить. Проверьте связь и попробуйте снова.",
     },
   },
 
