@@ -1,0 +1,108 @@
+name: Deploy Landing
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: registry.digitalocean.com/hrline-registry
+  IMAGE_NAME: hrline-landing
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Login to DO Container Registry
+        run: doctl registry login --expiry-seconds 1200
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy to Droplet (zero-downtime)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+            SERVICE="${{ env.IMAGE_NAME }}"
+            NETWORK="hrline"
+
+            docker network create $NETWORK 2>/dev/null || true
+
+            docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
+            docker pull $IMAGE
+
+            if docker ps --format '{{.Names}}' | grep -q "${SERVICE}-blue"; then
+              OLD_SLOT="blue"
+              NEW_SLOT="green"
+            else
+              OLD_SLOT="green"
+              NEW_SLOT="blue"
+            fi
+
+            echo "Deploying: $OLD_SLOT -> $NEW_SLOT"
+
+            docker run -d \
+              --name ${SERVICE}-${NEW_SLOT} \
+              --restart unless-stopped \
+              --network $NETWORK \
+              $IMAGE
+
+            echo "Waiting for health check..."
+            for i in $(seq 1 15); do
+              if docker exec ${SERVICE}-${NEW_SLOT} curl -sf http://localhost:3030/ > /dev/null 2>&1; then
+                echo "Health check passed!"
+                break
+              fi
+              if [ $i -eq 15 ]; then
+                echo "Health check failed, rolling back..."
+                docker stop ${SERVICE}-${NEW_SLOT} && docker rm ${SERVICE}-${NEW_SLOT}
+                exit 1
+              fi
+              sleep 2
+            done
+
+            # Update nginx config (supports transition from old hrlineuz as well as hrline-landing blue/green)
+            sed -i -E "s/(hrlineuz|hrline-landing)-(blue|green):3030/${SERVICE}-${NEW_SLOT}:3030/g" /opt/hrline/nginx/hrline.conf
+            docker exec nginx-proxy nginx -s reload
+
+            # Clean up old containers
+            docker stop ${SERVICE}-${OLD_SLOT} 2>/dev/null && docker rm ${SERVICE}-${OLD_SLOT} 2>/dev/null || true
+            docker stop hrlineuz-blue hrlineuz-green 2>/dev/null && docker rm hrlineuz-blue hrlineuz-green 2>/dev/null || true
+
+            echo "Deploy complete: now running ${SERVICE}-${NEW_SLOT}"
+
+      - name: Clean up old images
+        run: |
+          ALL_TAGS=$(doctl registry repository list-tags ${{ env.IMAGE_NAME }} --output json | jq -r 'sort_by(.updated_at) | reverse | .[].tag' | grep -v latest || true)
+          OLD_TAGS=$(echo "$ALL_TAGS" | tail -n +3)
+          if [ -n "$OLD_TAGS" ]; then
+            for TAG in $OLD_TAGS; do
+              echo "Deleting tag: $TAG"
+              doctl registry repository delete-tag ${{ env.IMAGE_NAME }} $TAG --force || true
+            done
+          else
+            echo "No old tags to clean up"
+          fi
