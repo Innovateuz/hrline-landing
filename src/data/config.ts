@@ -48,7 +48,8 @@ export const CONFIG = {
    */
   ads: {
     conversionId: import.meta.env.VITE_ADS_CONVERSION_ID || "AW-18413116444",
-    conversionLabel: import.meta.env.VITE_ADS_CONVERSION_LABEL || "",
+    conversionLabel:
+      import.meta.env.VITE_ADS_CONVERSION_LABEL || "TcDYCM_m7ukcEJy4h8xE",
   },
 };
 
