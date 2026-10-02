@@ -1,20 +1,22 @@
-name: Deploy Landing
+name: Deploy to Kubernetes
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
-env:
-  REGISTRY: registry.digitalocean.com/hrline-registry
-  IMAGE_NAME: hrline-landing
+concurrency:
+  group: deploy-hrline-landing
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.sha }}
+      REGISTRY: registry.digitalocean.com/hrline-registry
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install doctl
@@ -22,87 +24,56 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Login to DO Container Registry
+      - name: Log in to DigitalOcean Container Registry
         run: doctl registry login --expiry-seconds 1200
 
-      - name: Build Docker image
-        run: |
-          docker build \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Push Docker image
-        run: |
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-      - name: Deploy to Droplet (zero-downtime)
-        uses: appleboy/ssh-action@v1
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/hrline-landing:${{ env.TAG }}
+            ${{ env.REGISTRY }}/hrline-landing:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-            SERVICE="${{ env.IMAGE_NAME }}"
-            NETWORK="hrline"
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
 
-            docker network create $NETWORK 2>/dev/null || true
-
-            docker login -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} -p ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} registry.digitalocean.com
-            docker pull $IMAGE
-
-            if docker ps --format '{{.Names}}' | grep -q "${SERVICE}-blue"; then
-              OLD_SLOT="blue"
-              NEW_SLOT="green"
-            else
-              OLD_SLOT="green"
-              NEW_SLOT="blue"
-            fi
-
-            echo "Deploying: $OLD_SLOT -> $NEW_SLOT"
-
-            docker run -d \
-              --name ${SERVICE}-${NEW_SLOT} \
-              --restart unless-stopped \
-              --network $NETWORK \
-              $IMAGE
-
-            echo "Waiting for health check..."
-            for i in $(seq 1 15); do
-              if docker exec ${SERVICE}-${NEW_SLOT} curl -sf http://localhost:3030/ > /dev/null 2>&1; then
-                echo "Health check passed!"
-                break
-              fi
-              if [ $i -eq 15 ]; then
-                echo "Health check failed, rolling back..."
-                docker stop ${SERVICE}-${NEW_SLOT} && docker rm ${SERVICE}-${NEW_SLOT}
-                exit 1
-              fi
-              sleep 2
-            done
-
-            # Update nginx config (supports transition from old hrlineuz as well as hrline-landing blue/green)
-            sed -i -E "s/(hrlineuz|hrline-landing)-(blue|green):3030/${SERVICE}-${NEW_SLOT}:3030/g" /opt/hrline/nginx/hrline.conf
-            docker exec nginx-proxy nginx -s reload
-
-            # Clean up old containers
-            docker stop ${SERVICE}-${OLD_SLOT} 2>/dev/null && docker rm ${SERVICE}-${OLD_SLOT} 2>/dev/null || true
-            docker stop hrlineuz-blue hrlineuz-green 2>/dev/null && docker rm hrlineuz-blue hrlineuz-green 2>/dev/null || true
-
-            echo "Deploy complete: now running ${SERVICE}-${NEW_SLOT}"
-
-      - name: Clean up old images
+      - name: Configure Kubeconfig
         run: |
-          ALL_TAGS=$(doctl registry repository list-tags ${{ env.IMAGE_NAME }} --output json | jq -r 'sort_by(.updated_at) | reverse | .[].tag' | grep -v latest || true)
-          OLD_TAGS=$(echo "$ALL_TAGS" | tail -n +3)
-          if [ -n "$OLD_TAGS" ]; then
-            for TAG in $OLD_TAGS; do
-              echo "Deleting tag: $TAG"
-              doctl registry repository delete-tag ${{ env.IMAGE_NAME }} $TAG --force || true
-            done
-          else
-            echo "No old tags to clean up"
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Update GitOps Repository
+        run: |
+          git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/Innovateuz/gitops.git /tmp/gitops
+          cd /tmp/gitops
+          sed -i "s|tag:.*|tag: ${{ env.TAG }}|g" values/hrline/hrline-landing.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add values/hrline/hrline-landing.yaml
+          git commit -m "chore(hrline): deploy hrline-landing tag ${{ env.TAG }}" || exit 0
+          git push origin main
+          echo "✅ GitOps repo updated with new hrline-landing tag!"
+
+      - name: Trigger Instant Argo CD Sync
+        run: |
+          kubectl patch application hrline-landing -n argocd --type merge -p '{"operation":{"sync":{"prune":true}}}' || true
+
+      - name: Verify Kubernetes Rollout Status
+        run: |
+          echo "⏳ Waiting for hrline-landing rollout..."
+          if ! kubectl rollout status deployment/hrline-landing -n hrline --timeout=90s; then
+            echo "❌ Deployment hrline-landing failed to roll out!"
+            kubectl get pods -n hrline -l app=hrline-landing
+            kubectl logs -n hrline -l app=hrline-landing --tail=50 || true
+            exit 1
           fi
+          echo "✅ hrline-landing successfully rolled out!"
